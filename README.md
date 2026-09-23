@@ -14,7 +14,7 @@
 
 ## שימוש
 
-- האתר: https://tzachbasol.github.io/advisory-board/
+- האתר: https://tzachbasol.github.io/Advisory-Board/
 - בפעם הראשונה לוחצים על ⚙️ ומזינים מפתח API של Anthropic (מ-console.anthropic.com). המפתח נשמר רק בדפדפן ונשלח ישירות ל-Anthropic.
 - היסטוריית השאלות (עם תאריך ושעה) נשמרת בדפדפן שבו השתמשת.
 - אפשר לעצור ריצה באמצע, לכבות יועצים מסוימים ולבחור מודל.
