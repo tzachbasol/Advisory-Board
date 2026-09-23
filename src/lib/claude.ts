@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { API_URL } from './api';
 import type {
   BetaContentBlockParam,
   BetaMessageParam,
@@ -144,9 +145,11 @@ export const buildUserContent = (text: string, attachments: Attachment[]): BetaC
   return blocks;
 };
 
-export const createClient = (apiKey: string) =>
-  // The key is supplied by the user and stays in their browser.
-  new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+/** Talks to Claude through the advisory board server, which holds the real API key. */
+export const createClient = (sessionToken: string) =>
+  new Anthropic({ baseURL: API_URL, apiKey: null, authToken: sessionToken, dangerouslyAllowBrowser: true });
+
+export const isAuthError = (error: unknown) => error instanceof Anthropic.AuthenticationError;
 
 export interface StreamAdvisorOptions {
   client: Anthropic;
@@ -184,8 +187,8 @@ export const streamAdvisor = async ({ client, model, system, messages, signal, o
 };
 
 export const describeError = (error: unknown): string => {
-  if (error instanceof Anthropic.AuthenticationError) return 'מפתח ה-API לא תקין. בדוק אותו בהגדרות.';
-  if (error instanceof Anthropic.PermissionDeniedError) return 'למפתח הזה אין הרשאה למודל שנבחר.';
+  if (error instanceof Anthropic.AuthenticationError) return 'צריך להתחבר מחדש.';
+  if (error instanceof Anthropic.PermissionDeniedError) return 'אין הרשאה למודל שנבחר.';
   if (error instanceof Anthropic.RateLimitError) return 'חריגה ממגבלת הקצב - נסה שוב בעוד רגע.';
   if (error instanceof Anthropic.BadRequestError) return `בקשה לא תקינה: ${error.message}`;
   if (error instanceof Anthropic.APIConnectionError) return 'אין חיבור ל-Claude. בדוק את החיבור לאינטרנט.';

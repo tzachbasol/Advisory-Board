@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { BetaMessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages';
-import { Camera, FileText, History, Loader2, Paperclip, Plus, Send, Settings, Square, Trash2, Users, X } from 'lucide-react';
+import { Camera, FileText, History, Loader2, LogOut, Paperclip, Plus, Send, Settings, Square, Trash2, UserCog, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
@@ -20,12 +20,23 @@ import {
   buildUserContent,
   createClient,
   describeError,
+  isAuthError,
   fileToAttachment,
   streamAdvisor,
 } from '@/lib/claude';
+import { LoginScreen } from '@/components/LoginScreen';
+import { UsersDialog } from '@/components/UsersDialog';
+import { Session, loadSession, saveSession } from '@/lib/api';
 import { Conversation, Reply, Turn, formatWhen, loadHistory, newId, saveHistory } from '@/lib/history';
 
-const STORAGE_KEYS = { apiKey: 'advisors.apiKey', model: 'advisors.model', active: 'advisors.active' };
+const STORAGE_KEYS = { model: 'advisors.model', active: 'advisors.active' };
+
+// Keys typed into earlier versions of the app are no longer used; don't leave them lying around.
+try {
+  localStorage.removeItem('advisors.apiKey');
+} catch {
+  // storage unavailable
+}
 
 const load = (key: string) => {
   try {
@@ -126,8 +137,7 @@ const AttachmentChip = ({ attachment, onRemove }: { attachment: Attachment; onRe
   </div>
 );
 
-const Advisors = () => {
-  const [apiKey, setApiKey] = useState(() => load(STORAGE_KEYS.apiKey) ?? '');
+const Board = ({ session, onLogout }: { session: Session; onLogout: () => void }) => {
   const [model, setModel] = useState<ModelId>(() => {
     const stored = load(STORAGE_KEYS.model);
     return MODELS.some((m) => m.id === stored) ? (stored as ModelId) : DEFAULT_MODEL;
@@ -142,7 +152,7 @@ const Advisors = () => {
     return ADVISORS.map((a) => a.id);
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [draftKey, setDraftKey] = useState(apiKey);
+  const [usersOpen, setUsersOpen] = useState(false);
 
   const [turns, setTurns] = useState<Turn[]>([]);
   const [text, setText] = useState('');
@@ -220,7 +230,7 @@ const Advisors = () => {
     [history],
   );
 
-  const client = useMemo(() => (apiKey ? createClient(apiKey) : null), [apiKey]);
+  const client = useMemo(() => createClient(session.token), [session.token]);
 
   const addFiles = async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
@@ -262,11 +272,6 @@ const Advisors = () => {
   const send = () => {
     if (busy) return;
     if (!text.trim() && !attachments.length) return;
-    if (!client) {
-      setDraftKey(apiKey);
-      setSettingsOpen(true);
-      return;
-    }
     if (!active.length) {
       toast.error('בחר לפחות יועץ אחד');
       return;
@@ -298,23 +303,17 @@ const Advisors = () => {
         onText: (delta) => updateReply(turn.id, advisor.id, (r) => ({ ...r, text: r.text + delta })),
       })
         .then((final) => updateReply(turn.id, advisor.id, () => ({ text: final, status: 'done' })))
-        .catch((error) =>
+        .catch((error) => {
+          if (isAuthError(error)) onLogout();
           updateReply(turn.id, advisor.id, (r) =>
             controller.signal.aborted
               ? r.text
                 ? { ...r, status: 'done', stopped: true }
                 : { ...r, status: 'error', error: 'נעצר לפני שהספיק לענות', stopped: true }
               : { ...r, status: 'error', error: describeError(error) },
-          ),
-        );
+          );
+        });
     }
-  };
-
-  const saveSettings = () => {
-    const key = draftKey.trim();
-    setApiKey(key);
-    save(STORAGE_KEYS.apiKey, key);
-    setSettingsOpen(false);
   };
 
   return (
@@ -339,15 +338,13 @@ const Advisors = () => {
                 <span className="hidden sm:inline">שיחה חדשה</span>
               </Button>
             )}
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={() => {
-                setDraftKey(apiKey);
-                setSettingsOpen(true);
-              }}
-              aria-label="הגדרות"
-            >
+            {session.isAdmin && (
+              <Button variant="outline" size="sm" onClick={() => setUsersOpen(true)} aria-label="משתמשים">
+                <UserCog className="h-4 w-4 sm:ml-1" />
+                <span className="hidden sm:inline">משתמשים</span>
+              </Button>
+            )}
+            <Button variant="outline" size="icon" onClick={() => setSettingsOpen(true)} aria-label="הגדרות">
               <Settings className="h-4 w-4" />
             </Button>
           </div>
@@ -355,17 +352,6 @@ const Advisors = () => {
       </header>
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
-        {!apiKey && (
-          <Card className="border-amber-300 bg-amber-50">
-            <CardContent className="py-4 flex flex-wrap items-center justify-between gap-3 text-sm">
-              <span>כדי שהיועצים יענו, צריך להזין מפתח API של Anthropic (נשמר רק בדפדפן שלך).</span>
-              <Button size="sm" onClick={() => setSettingsOpen(true)}>
-                הזן מפתח
-              </Button>
-            </CardContent>
-          </Card>
-        )}
-
         {turns.length === 0 && (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {ADVISORS.map((a) => (
@@ -581,21 +567,10 @@ const Advisors = () => {
           <DialogHeader className="text-right sm:text-right">
             <DialogTitle>הגדרות</DialogTitle>
             <DialogDescription>
-              המפתח נשמר רק בדפדפן הזה ונשלח ישירות ל-Anthropic. אפשר ליצור מפתח ב-console.anthropic.com.
+              מחובר בתור <bdi dir="ltr">{session.username}</bdi>
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="api-key">מפתח API של Anthropic</Label>
-              <Input
-                id="api-key"
-                type="password"
-                dir="ltr"
-                placeholder="sk-ant-..."
-                value={draftKey}
-                onChange={(e) => setDraftKey(e.target.value)}
-              />
-            </div>
             <div className="space-y-2">
               <Label>מודל</Label>
               <Select value={model} onValueChange={(v) => setModel(v as ModelId)}>
@@ -613,12 +588,29 @@ const Advisors = () => {
             </div>
           </div>
           <DialogFooter className="gap-2 sm:justify-start">
-            <Button onClick={saveSettings}>שמור</Button>
+            <Button onClick={() => setSettingsOpen(false)}>סגור</Button>
+            <Button variant="outline" onClick={onLogout} disabled={busy}>
+              <LogOut className="h-4 w-4 ml-1" /> התנתק
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {session.isAdmin && (
+        <UsersDialog open={usersOpen} onOpenChange={setUsersOpen} token={session.token} onUnauthorized={onLogout} />
+      )}
     </div>
   );
+};
+
+const Advisors = () => {
+  const [session, setSession] = useState<Session | null>(loadSession);
+  const update = (next: Session | null) => {
+    saveSession(next);
+    setSession(next);
+  };
+  if (!session) return <LoginScreen onLogin={update} />;
+  return <Board key={session.username} session={session} onLogout={() => update(null)} />;
 };
 
 export default Advisors;

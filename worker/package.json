@@ -1,0 +1,15 @@
+{
+  "name": "advisory-board-api",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260923.1",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.137.0"
+  },
+  "private": true
+}
